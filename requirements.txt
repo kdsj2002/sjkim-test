@@ -11,3 +11,6 @@ mypy>=1.5.0
 
 # 유틸리티
 python-dotenv>=1.0.0
+
+# Windows curses 지원
+windows-curses>=2.3.0; platform_system=='Windows'

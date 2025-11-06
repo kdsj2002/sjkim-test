@@ -30,6 +30,10 @@ venv\Scripts\activate
 pip install -r requirements.txt
 ```
 
+**Windows 사용자 주의사항:**
+- Windows에서는 `windows-curses` 패키지가 자동으로 설치됩니다
+- 만약 설치 중 문제가 발생하면: `pip install windows-curses`
+
 ## 게임 실행 방법
 
 ```bash
