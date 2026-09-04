@@ -392,6 +392,23 @@ def create_hosted_zone(client, domain_fqdn, private, vpc_id, vpc_region, comment
     return zone, ns_values
 
 
+def unescape_route53_name(name):
+    """Route 53 는 이름을 돌려줄 때 '*' 같은 특수 문자를 BIND master-file 방식의
+    8진수 이스케이프(\\052 등)로 인코딩해서 준다. zone 파일 쪽은 '*'를 그대로
+    쓰기 때문에, 풀어주지 않으면 같은 레코드인데도 다른 이름으로 보여서
+    이미 있는 와일드카드를 신규 생성 시도하다 InvalidChangeBatch 로 실패한다."""
+    out = []
+    i, n = 0, len(name)
+    while i < n:
+        if name[i] == "\\" and i + 4 <= n and name[i + 1 : i + 4].isdigit():
+            out.append(chr(int(name[i + 1 : i + 4], 8)))
+            i += 4
+        else:
+            out.append(name[i])
+            i += 1
+    return "".join(out)
+
+
 def fetch_existing_rrsets(client, hosted_zone_id):
     out = {}
     alias_names = []
@@ -399,7 +416,7 @@ def fetch_existing_rrsets(client, hosted_zone_id):
         paginator = client.get_paginator("list_resource_record_sets")
         for page in paginator.paginate(HostedZoneId=hosted_zone_id):
             for rr in page["ResourceRecordSets"]:
-                name = rr["Name"].lower()
+                name = unescape_route53_name(rr["Name"]).lower()
                 rtype = rr["Type"]
                 if "AliasTarget" in rr:
                     alias_names.append((name, rtype))
