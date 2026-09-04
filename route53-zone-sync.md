@@ -16,6 +16,9 @@ python3 route53-zone-sync.py example.com example.com.zone
      (이 네임서버로 등록기관 위임을 안 걸면 아무 것도 서비스되지 않는다.)
    - 있으면 그 존의 레코드셋을 전부 받아온다.
 3. zone 파일 쪽과 Route 53 쪽을 (이름, 타입) 단위로 비교해서 생성/변경 대상을 뽑는다.
+   Route 53이 이름을 돌려줄 때 `*` 같은 특수문자를 `\052`처럼 8진수로 이스케이프해서
+   주는데, 그대로 두면 zone 파일의 `*`와 문자열이 달라서 같은 레코드인데도 신규로
+   보인다. 비교 전에 항상 풀어준다.
 4. 화면에 목록을 보여주고, 전체 적용·개별 선택·취소 중 고르게 한다.
 5. 고른 것만 `change_resource_record_sets`로 제출한다.
 
@@ -82,3 +85,7 @@ PTR, SOA(무시), SPF, SRV, TXT. DNSKEY, SSHFP, TLSA, HINFO 등은 건너뛰고
   있는 레코드는 그대로 두고 개수만 알려준다.
 - 존 자체를 실수로 지우거나 대량 삭제하는 걸 막으려고 삭제는 항상
   명시적으로 켜야 하고, 개별 확인의 기본값도 "아니오"다.
+- 호스트존 조회(`list_hosted_zones_by_name`)는 boto3 표준 페이지네이터가 없는
+  오퍼레이션이라 `IsTruncated`/`NextDNSName`/`NextHostedZoneId`로 직접 돈다.
+  같은 파일에서 쓰는 `list_resource_record_sets`는 표준 방식이라 페이지네이터를
+  그대로 쓴다.
