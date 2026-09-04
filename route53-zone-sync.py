@@ -343,20 +343,30 @@ def make_client(region, profile):
 
 
 def find_hosted_zone(client, domain_fqdn, private):
+    # list_hosted_zones_by_name 은 NextToken 이 아니라 NextDNSName/NextHostedZoneId
+    # 로 이어지는 자체 방식이라 boto3 표준 페이지네이터가 없다
+    # (get_paginator 가 OperationNotPageableError 를 던진다). 직접 돈다.
+    matches = []
+    kwargs = {"DNSName": domain_fqdn}
     try:
-        paginator = client.get_paginator("list_hosted_zones_by_name")
-        matches = []
-        for page in paginator.paginate(DNSName=domain_fqdn):
-            for z in page["HostedZones"]:
+        while True:
+            resp = client.list_hosted_zones_by_name(**kwargs)
+            zones = resp.get("HostedZones", [])
+            for z in zones:
                 if z["Name"].lower() != domain_fqdn:
                     continue
                 if bool(z["Config"].get("PrivateZone", False)) != private:
                     continue
                 matches.append(z)
-            # list_hosted_zones_by_name 은 이름순 정렬이라, 더 이상 같은 이름이
-            # 안 나오면 멈춰도 된다.
-            if page["HostedZones"] and page["HostedZones"][-1]["Name"].lower() > domain_fqdn:
+            # 이름순 정렬이라 같은 이름을 지나쳤으면 더 볼 필요 없다.
+            if zones and zones[-1]["Name"].lower() > domain_fqdn:
                 break
+            if not resp.get("IsTruncated"):
+                break
+            kwargs = {
+                "DNSName": resp["NextDNSName"],
+                "HostedZoneId": resp["NextHostedZoneId"],
+            }
         return matches
     except ClientError as e:
         die(f"호스트존 조회 실패: {e}")
