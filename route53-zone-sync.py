@@ -343,20 +343,30 @@ def make_client(region, profile):
 
 
 def find_hosted_zone(client, domain_fqdn, private):
+    # list_hosted_zones_by_name 은 NextToken 이 아니라 NextDNSName/NextHostedZoneId
+    # 로 이어지는 자체 방식이라 boto3 표준 페이지네이터가 없다
+    # (get_paginator 가 OperationNotPageableError 를 던진다). 직접 돈다.
+    matches = []
+    kwargs = {"DNSName": domain_fqdn}
     try:
-        paginator = client.get_paginator("list_hosted_zones_by_name")
-        matches = []
-        for page in paginator.paginate(DNSName=domain_fqdn):
-            for z in page["HostedZones"]:
+        while True:
+            resp = client.list_hosted_zones_by_name(**kwargs)
+            zones = resp.get("HostedZones", [])
+            for z in zones:
                 if z["Name"].lower() != domain_fqdn:
                     continue
                 if bool(z["Config"].get("PrivateZone", False)) != private:
                     continue
                 matches.append(z)
-            # list_hosted_zones_by_name 은 이름순 정렬이라, 더 이상 같은 이름이
-            # 안 나오면 멈춰도 된다.
-            if page["HostedZones"] and page["HostedZones"][-1]["Name"].lower() > domain_fqdn:
+            # 이름순 정렬이라 같은 이름을 지나쳤으면 더 볼 필요 없다.
+            if zones and zones[-1]["Name"].lower() > domain_fqdn:
                 break
+            if not resp.get("IsTruncated"):
+                break
+            kwargs = {
+                "DNSName": resp["NextDNSName"],
+                "HostedZoneId": resp["NextHostedZoneId"],
+            }
         return matches
     except ClientError as e:
         die(f"호스트존 조회 실패: {e}")
@@ -382,6 +392,23 @@ def create_hosted_zone(client, domain_fqdn, private, vpc_id, vpc_region, comment
     return zone, ns_values
 
 
+def unescape_route53_name(name):
+    """Route 53 는 이름을 돌려줄 때 '*' 같은 특수 문자를 BIND master-file 방식의
+    8진수 이스케이프(\\052 등)로 인코딩해서 준다. zone 파일 쪽은 '*'를 그대로
+    쓰기 때문에, 풀어주지 않으면 같은 레코드인데도 다른 이름으로 보여서
+    이미 있는 와일드카드를 신규 생성 시도하다 InvalidChangeBatch 로 실패한다."""
+    out = []
+    i, n = 0, len(name)
+    while i < n:
+        if name[i] == "\\" and i + 4 <= n and name[i + 1 : i + 4].isdigit():
+            out.append(chr(int(name[i + 1 : i + 4], 8)))
+            i += 4
+        else:
+            out.append(name[i])
+            i += 1
+    return "".join(out)
+
+
 def fetch_existing_rrsets(client, hosted_zone_id):
     out = {}
     alias_names = []
@@ -389,7 +416,7 @@ def fetch_existing_rrsets(client, hosted_zone_id):
         paginator = client.get_paginator("list_resource_record_sets")
         for page in paginator.paginate(HostedZoneId=hosted_zone_id):
             for rr in page["ResourceRecordSets"]:
-                name = rr["Name"].lower()
+                name = unescape_route53_name(rr["Name"]).lower()
                 rtype = rr["Type"]
                 if "AliasTarget" in rr:
                     alias_names.append((name, rtype))
