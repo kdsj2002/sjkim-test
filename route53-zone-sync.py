@@ -413,18 +413,23 @@ class Change:
 
 def diff_rrsets(desired, existing, origin, allow_apex_ns, allow_delete):
     changes = []
-    skipped_apex = []
+    skipped_apex = []  # (사유, RRSet) 튜플. 절대 적용되지 않고 화면 표시용으로만 쓴다.
 
     for key, want in sorted(desired.items()):
         name, rtype = key
         is_apex = name == origin
 
         if rtype == "SOA":
-            continue  # Route 53 이 자체 관리
+            # Route 53 이 MNAME(자기 네임서버)을 갖고 자체 관리하는 값이라
+            # zone 파일 값으로 덮어쓰지 않는다. 실제 값과 다르면 정보로만 보여준다.
+            have = existing.get(key)
+            if have is not None and have.values != want.values:
+                skipped_apex.append(("SOA", want))
+            continue
         if rtype == "NS" and is_apex and not allow_apex_ns:
             have = existing.get(key)
             if have is None or have.values != want.values:
-                skipped_apex.append(want)
+                skipped_apex.append(("NS", want))
             continue
 
         have = existing.get(key)
@@ -471,9 +476,10 @@ def print_summary(changes, deletions, skipped_apex, allow_delete):
     print()
     print(f"생성 {n_create}건 / 변경 {n_upsert}건" + (f" / 삭제 후보 {len(deletions)}건" if allow_delete else ""))
     if skipped_apex:
-        print(f"apex NS 차이 {len(skipped_apex)}건은 위임 정보라 자동으로 건드리지 않는다 (--allow-apex-ns 로 강제 가능):")
-        for w in skipped_apex:
-            print(f"    {w.name} NS  {fmt_values(w.values)}")
+        print(f"apex SOA/NS 차이 {len(skipped_apex)}건은 Route 53이 자체 관리하는 값이라 건드리지 않는다"
+              " (NS는 --allow-apex-ns 로 강제 가능, SOA는 강제 불가):")
+        for reason, w in skipped_apex:
+            print(f"    {w.name} {reason}  {fmt_values(w.values)}")
     print()
 
 
